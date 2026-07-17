@@ -274,7 +274,11 @@ def _run_pbr_attempts(
         attempt = {
             "baker": baker,
             "target_faces": target,
-            "technical_safety_target": target == SAFETY_FACE_TARGET and raw_faces > SAFETY_FACE_TARGET,
+            "technical_safety_target": (
+                requested_target is None
+                and target == SAFETY_FACE_TARGET
+                and raw_faces > SAFETY_FACE_TARGET
+            ),
         }
         attempt_started = time.perf_counter()
         try:
@@ -533,8 +537,12 @@ def main() -> int:
 
         metadata["candidate_pbr"] = _candidate_stats(candidate_path, exported)
         metadata["candidate_pbr"].update(chosen)
-        metadata["candidate_pbr"]["technical_decimation"] = bool(
+        metadata["candidate_pbr"]["decimated"] = bool(
             chosen["target_faces"] is not None and chosen["target_faces"] < raw_faces
+        )
+        metadata["candidate_pbr"]["technical_decimation"] = bool(
+            metadata["candidate_pbr"]["decimated"]
+            and chosen["technical_safety_target"]
         )
         metadata["timings_seconds"]["pbr_export"] = round(time.perf_counter() - pbr_started, 3)
         from trellis2.gltf_validation import validate_output_pair

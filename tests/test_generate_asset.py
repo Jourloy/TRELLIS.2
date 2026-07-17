@@ -98,6 +98,24 @@ def test_explicit_kdtree_never_loads_metal():
     assert list(generate_asset._attempt_schedule("kdtree", None, 1000)) == [("kdtree", None)]
 
 
+def test_explicit_200k_target_is_not_mislabeled_as_safety_fallback(tmp_path: Path):
+    def fake_export(mesh, path, *, baker, target, texture_size):
+        path.write_bytes(b"candidate")
+        return object(), True
+
+    _, chosen, _ = generate_asset._run_pbr_attempts(
+        _mesh(800_000),
+        tmp_path / "candidate_pbr.glb",
+        preferred_baker="kdtree",
+        requested_target=200_000,
+        texture_size=512,
+        export_fn=fake_export,
+    )
+
+    assert chosen["target_faces"] == 200_000
+    assert chosen["technical_safety_target"] is False
+
+
 def test_raw_export_preserves_full_topology_and_writes_vertex_normals(tmp_path: Path):
     vertices = torch.tensor(
         [
