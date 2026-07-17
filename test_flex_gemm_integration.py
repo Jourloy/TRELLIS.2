@@ -16,6 +16,14 @@ torch.zeros_like which lacks an MPS kernel in some PyTorch builds. That is a
 PyTorch issue, separate from the mtlgemm fix being verified here.
 """
 
+# This is an intentionally standalone, verbose MPS integration program rather
+# than a pytest module. Avoid executing its device setup during pytest
+# collection; CI and macOS acceptance invoke it directly.
+if __name__ != "__main__":
+    import pytest
+
+    pytest.skip("run test_flex_gemm_integration.py directly", allow_module_level=True)
+
 import os
 os.environ.setdefault("SPARSE_CONV_BACKEND", "flex_gemm")
 os.environ.setdefault("SPARSE_ATTN_BACKEND", "sdpa")
