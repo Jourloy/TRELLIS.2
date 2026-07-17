@@ -23,7 +23,7 @@ def test_remesh_cli_defaults_and_overrides():
     defaults = generate_asset._parse_args(["input.png", "--output-dir", "output"])
     assert defaults.remesh is True
     assert defaults.remesh_band == 1.0
-    assert defaults.remesh_project == 0.0
+    assert defaults.remesh_project == 0.7
 
     disabled = generate_asset._parse_args(
         [

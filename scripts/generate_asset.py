@@ -37,6 +37,7 @@ from trellis2.model_revisions import (  # noqa: E402
     TRELLIS_REVISION,
 )
 from trellis2.mesh_integrity import measure_glb  # noqa: E402
+from trellis2.backends import fp32_decode_thresholds_enabled  # noqa: E402
 
 SAFETY_FACE_TARGET = 200_000
 WATCHDOG_SIGNATURES = (
@@ -284,7 +285,7 @@ def _run_pbr_attempts(
     texture_size: int,
     remesh: bool = True,
     remesh_band: float = 1.0,
-    remesh_project: float = 0.0,
+    remesh_project: float = 0.7,
     export_fn=None,
     on_attempt=None,
 ):
@@ -450,7 +451,7 @@ def _parse_args(argv: Optional[list[str]] = None):
     remesh_group.add_argument("--no-remesh", dest="remesh", action="store_false")
     parser.set_defaults(remesh=True)
     parser.add_argument("--remesh-band", type=float, default=1.0)
-    parser.add_argument("--remesh-project", type=float, default=0.0)
+    parser.add_argument("--remesh-project", type=float, default=0.7)
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -510,6 +511,7 @@ def main() -> int:
             "remesh": args.remesh,
             "remesh_band": args.remesh_band,
             "remesh_project": args.remesh_project,
+            "fp32_decode_thresholds": fp32_decode_thresholds_enabled(),
             "offline": args.offline,
             "cache_dir": args.cache_dir,
         },

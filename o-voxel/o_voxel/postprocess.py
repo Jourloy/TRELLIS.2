@@ -95,9 +95,11 @@ def to_glb(
     texture_size: int = 2048,
     remesh: bool = True,
     remesh_band: float = 1,
-    # project_back=0 matches upstream app.py; measured >0 drags DC vertices
-    # into dirty source sheets (speckle artifacts on ak74m body and magazine).
-    remesh_project: float = 0,
+    # project_back recovers sub-voxel detail lost by DC remeshing. Measured on
+    # ak74m: 0.7 on a clean raw sharpens with zero integrity cost; on dirty
+    # raws (double-walled hollow objects like magazines) any projection drags
+    # DC vertices into noisy source sheets (speckles) — pass 0 there.
+    remesh_project: float = 0.7,
     mesh_cluster_threshold_cone_half_angle_rad=np.radians(90.0),
     mesh_cluster_refine_iterations=0,
     mesh_cluster_global_iterations=1,
