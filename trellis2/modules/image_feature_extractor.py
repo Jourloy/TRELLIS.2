@@ -8,6 +8,7 @@ from torchvision import transforms
 from transformers import DINOv3ViTModel
 import numpy as np
 from PIL import Image
+from ..model_revisions import DINOV3_REPO, DINOV3_REVISION
 
 
 class DinoV2FeatureExtractor:
@@ -69,9 +70,21 @@ class DinoV3FeatureExtractor:
     """
     Feature extractor for DINOv3 models.
     """
-    def __init__(self, model_name: str, image_size=512):
+    def __init__(
+        self,
+        model_name: str = DINOV3_REPO,
+        image_size=512,
+        revision: Optional[str] = DINOV3_REVISION,
+        cache_dir: Optional[str] = None,
+        local_files_only: bool = False,
+    ):
         self.model_name = model_name
-        self.model = DINOv3ViTModel.from_pretrained(model_name)
+        self.model = DINOv3ViTModel.from_pretrained(
+            model_name,
+            revision=revision,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+        )
         self.model.eval()
         self.image_size = image_size
         self.transform = transforms.Compose([

@@ -8,27 +8,35 @@ import trimesh
 import trimesh.visual
 
 import platform
+import os
 
 _HAS_DR = False
 _HAS_MESH = False
 _BACKEND = None
 dr = None
+_METAL_DISABLED = os.environ.get('TRELLIS_DISABLE_METAL', '0') == '1'
+_BACKEND_ERRORS = {}
 
 # Differentiable rasterizer — mtldiffrast (Metal) or nvdiffrast (CUDA)
 try:
+    if _METAL_DISABLED:
+        raise ImportError('Metal disabled by TRELLIS_DISABLE_METAL=1')
     import mtldiffrast.torch as dr
     _HAS_DR = True
     _BACKEND = 'metal'
-except ImportError:
+except (ImportError, RuntimeError, OSError) as exc:
+    _BACKEND_ERRORS['mtldiffrast'] = str(exc)
     try:
         import nvdiffrast.torch as dr
         _HAS_DR = True
         _BACKEND = 'cuda'
-    except ImportError:
-        pass
+    except (ImportError, RuntimeError, OSError) as cuda_exc:
+        _BACKEND_ERRORS['nvdiffrast'] = str(cuda_exc)
 
 # Mesh processing — cumesh auto-selects Metal/CUDA
 try:
+    if _METAL_DISABLED and platform.system() == 'Darwin':
+        raise ImportError('Metal disabled by TRELLIS_DISABLE_METAL=1')
     import cumesh
     _MeshBackend = cumesh.CuMesh
     _BVH = cumesh.cuBVH
@@ -36,15 +44,18 @@ try:
     _HAS_MESH = True
     if _BACKEND is None:
         _BACKEND = 'metal' if platform.system() == 'Darwin' else 'cuda'
-except ImportError:
-    pass
+except (ImportError, RuntimeError, OSError) as exc:
+    _BACKEND_ERRORS['cumesh'] = str(exc)
 
 _HAS_GPU_DEPS = _HAS_DR and _HAS_MESH
 
 try:
+    if _METAL_DISABLED and platform.system() == 'Darwin':
+        raise ImportError('Metal disabled by TRELLIS_DISABLE_METAL=1')
     from flex_gemm.ops.grid_sample import grid_sample_3d as _flex_grid_sample_3d
     _HAS_FLEX_GEMM = True
-except ImportError:
+except (ImportError, RuntimeError, OSError) as exc:
+    _BACKEND_ERRORS['flex_gemm'] = str(exc)
     _HAS_FLEX_GEMM = False
 
 
@@ -80,7 +91,7 @@ def to_glb(
     aabb: Union[list, tuple, np.ndarray, torch.Tensor],
     voxel_size: Union[float, list, tuple, np.ndarray, torch.Tensor] = None,
     grid_size: Union[int, list, tuple, np.ndarray, torch.Tensor] = None,
-    decimation_target: int = 1000000,
+    decimation_target: Optional[int] = 1000000,
     texture_size: int = 2048,
     remesh: bool = False,
     remesh_band: float = 1,
@@ -105,7 +116,7 @@ def to_glb(
         aabb: (2, 3) tensor of minimum and maximum coordinates of the volume
         voxel_size: (3,) tensor of size of each voxel
         grid_size: (3,) tensor of number of voxels in each dimension
-        decimation_target: target number of vertices for mesh simplification
+        decimation_target: target face count, or None to preserve full resolution
         texture_size: size of the texture for baking
         remesh: whether to perform remeshing
         remesh_band: size of the remeshing band
@@ -178,6 +189,12 @@ def to_glb(
     if verbose:
         print(f"Original mesh: {vertices.shape[0]} vertices, {faces.shape[0]} faces")
 
+    effective_decimation_target = (
+        int(faces.shape[0]) if decimation_target is None else int(decimation_target)
+    )
+    if effective_decimation_target <= 0:
+        effective_decimation_target = int(faces.shape[0])
+
     # Move data to GPU
     vertices = vertices.to(device)
     faces = faces.to(device)
@@ -214,7 +231,7 @@ def to_glb(
     # --- Branch 1: Standard Pipeline (Simplification & Cleaning) ---
     if not remesh:
         # Step 1: Aggressive simplification (3x target)
-        mesh.simplify(decimation_target * 3, verbose=verbose)
+        mesh.simplify(effective_decimation_target * 3, verbose=verbose)
         if verbose:
             print(f"After inital simplification: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
         
@@ -227,7 +244,7 @@ def to_glb(
             print(f"After initial cleanup: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
             
         # Step 3: Final simplification to target count
-        mesh.simplify(decimation_target, verbose=verbose)
+        mesh.simplify(effective_decimation_target, verbose=verbose)
         if verbose:
             print(f"After final simplification: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
         
@@ -271,7 +288,7 @@ def to_glb(
             print(f"After cleanup: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
 
         # Simplify and clean the remeshed result
-        mesh.simplify(decimation_target, verbose=verbose)
+        mesh.simplify(effective_decimation_target, verbose=verbose)
         if verbose:
             print(f"After simplifying: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
     

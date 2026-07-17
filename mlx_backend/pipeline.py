@@ -12,6 +12,12 @@ import json
 import time
 import logging
 
+from trellis2.model_revisions import (
+    DINOV3_REVISION,
+    RMBG_REVISION,
+    revision_for_repo,
+)
+
 import mlx.core as mx
 
 logger = logging.getLogger(__name__)
@@ -30,23 +36,43 @@ from .adapters import (
 )
 
 
-def _resolve_hf_path(rel_path: str) -> str:
+def _resolve_hf_path(
+    rel_path: str,
+    *,
+    cache_dir: str = None,
+    local_files_only: bool = False,
+) -> str:
     """Resolve 'org/repo/path/to/file' to local HF cache path."""
     from huggingface_hub import hf_hub_download
     parts = rel_path.split('/')
     repo_id = f"{parts[0]}/{parts[1]}"
     file_base = '/'.join(parts[2:])
-    json_path = hf_hub_download(repo_id, f"{file_base}.json")
-    hf_hub_download(repo_id, f"{file_base}.safetensors")
+    hub_kwargs = {
+        "revision": revision_for_repo(repo_id),
+        "cache_dir": cache_dir,
+        "local_files_only": local_files_only,
+    }
+    json_path = hf_hub_download(repo_id, f"{file_base}.json", **hub_kwargs)
+    hf_hub_download(repo_id, f"{file_base}.safetensors", **hub_kwargs)
     return json_path.rsplit('.json', 1)[0]
 
 
-def _resolve_model_path(weights_path: str, rel_path: str) -> str:
+def _resolve_model_path(
+    weights_path: str,
+    rel_path: str,
+    *,
+    cache_dir: str = None,
+    local_files_only: bool = False,
+) -> str:
     """Resolve model path — local first, then HF Hub."""
     full = os.path.join(weights_path, rel_path)
     if os.path.exists(f"{full}.json"):
         return full
-    return _resolve_hf_path(rel_path)
+    return _resolve_hf_path(
+        rel_path,
+        cache_dir=cache_dir,
+        local_files_only=local_files_only,
+    )
 
 
 def _load_mlx_flow_model(path: str, config: dict):
@@ -164,7 +190,12 @@ def _get_loader(name: str, config: dict):
     raise ValueError(f"No loader for model '{name}' (type: {config['name']})")
 
 
-def create_mlx_pipeline(weights_path: str = "weights/TRELLIS.2-4B"):
+def create_mlx_pipeline(
+    weights_path: str = "weights/TRELLIS.2-4B",
+    *,
+    cache_dir: str = None,
+    local_files_only: bool = False,
+):
     """Create upstream Trellis2ImageTo3DPipeline with MLX-backed models.
 
     All model compute runs in MLX. The upstream PT pipeline handles
@@ -183,7 +214,12 @@ def create_mlx_pipeline(weights_path: str = "weights/TRELLIS.2-4B"):
     # Load all models with MLX adapters
     models = {}
     for name, rel_path in args['models'].items():
-        path = _resolve_model_path(weights_path, rel_path)
+        path = _resolve_model_path(
+            weights_path,
+            rel_path,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+        )
         with open(f"{path}.json") as f:
             model_config = json.load(f)
 
@@ -219,11 +255,21 @@ def create_mlx_pipeline(weights_path: str = "weights/TRELLIS.2-4B"):
 
     # Image conditioning (MLX DINOv3)
     pipeline.image_cond_model = MlxImageCondAdapter(
-        load_dinov3_from_hf(args['image_cond_model']['args']['model_name'])
+        load_dinov3_from_hf(
+            args['image_cond_model']['args']['model_name'],
+            revision=DINOV3_REVISION,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+        )
     )
 
     # Background removal (PT — lightweight, used once)
-    pipeline.rembg_model = BiRefNet(**args['rembg_model']['args'])
+    pipeline.rembg_model = BiRefNet(
+        **args['rembg_model']['args'],
+        revision=RMBG_REVISION,
+        cache_dir=cache_dir,
+        local_files_only=local_files_only,
+    )
 
     pipeline.low_vram = True
     pipeline._device = torch.device('cpu')

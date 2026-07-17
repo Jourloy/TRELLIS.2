@@ -89,15 +89,24 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         self._device = 'cpu'
 
     @classmethod
-    def from_pretrained(cls, path: str, config_file: str = "pipeline.json") -> "Trellis2ImageTo3DPipeline":
+    def from_pretrained(
+        cls,
+        path: str,
+        config_file: str = "pipeline.json",
+        **hub_kwargs,
+    ) -> "Trellis2ImageTo3DPipeline":
         """
         Load a pretrained model.
 
         Args:
             path (str): The path to the model. Can be either local path or a Hugging Face repository.
         """
-        pipeline = super().from_pretrained(path, config_file)
+        pipeline = super().from_pretrained(path, config_file, **hub_kwargs)
         args = pipeline._pretrained_args
+        dependency_hub_kwargs = {
+            "cache_dir": hub_kwargs.get("cache_dir"),
+            "local_files_only": hub_kwargs.get("local_files_only", False),
+        }
 
         pipeline.sparse_structure_sampler = getattr(samplers, args['sparse_structure_sampler']['name'])(**args['sparse_structure_sampler']['args'])
         pipeline.sparse_structure_sampler_params = args['sparse_structure_sampler']['params']
@@ -111,8 +120,14 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         pipeline.shape_slat_normalization = args['shape_slat_normalization']
         pipeline.tex_slat_normalization = args['tex_slat_normalization']
 
-        pipeline.image_cond_model = getattr(image_feature_extractor, args['image_cond_model']['name'])(**args['image_cond_model']['args'])
-        pipeline.rembg_model = getattr(rembg, args['rembg_model']['name'])(**args['rembg_model']['args'])
+        pipeline.image_cond_model = getattr(image_feature_extractor, args['image_cond_model']['name'])(
+            **args['image_cond_model']['args'],
+            **dependency_hub_kwargs,
+        )
+        pipeline.rembg_model = getattr(rembg, args['rembg_model']['name'])(
+            **args['rembg_model']['args'],
+            **dependency_hub_kwargs,
+        )
         
         pipeline.low_vram = args.get('low_vram', True)
         pipeline.default_pipeline_type = args.get('default_pipeline_type', '1024_cascade')
@@ -161,6 +176,16 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         output_np = np.array(output)
         alpha = output_np[:, :, 3]
         bbox = np.argwhere(alpha > 0.8 * 255)
+        # Preserve deliberately soft RGBA masks. The high-confidence threshold
+        # is useful for RMBG output, but an authored semi-transparent object can
+        # legitimately have no pixels above it.
+        if bbox.size == 0:
+            bbox = np.argwhere(alpha > 0)
+        if bbox.size == 0:
+            raise RuntimeError(
+                "Background preprocessing produced an empty alpha mask; provide "
+                "a non-empty RGBA input or retry with --background keep."
+            )
         bbox = np.min(bbox[:, 1]), np.min(bbox[:, 0]), np.max(bbox[:, 1]), np.max(bbox[:, 0])
         center = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
         size = max(bbox[2] - bbox[0], bbox[3] - bbox[1])

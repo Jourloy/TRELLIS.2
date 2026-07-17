@@ -3,12 +3,23 @@ from transformers import AutoModelForImageSegmentation
 import torch
 from torchvision import transforms
 from PIL import Image
+from ...model_revisions import RMBG_REPO, RMBG_REVISION
 
 
 class BiRefNet:
-    def __init__(self, model_name: str = "ZhengPeng7/BiRefNet"):
+    def __init__(
+        self,
+        model_name: str = RMBG_REPO,
+        revision: Optional[str] = RMBG_REVISION,
+        cache_dir: Optional[str] = None,
+        local_files_only: bool = False,
+    ):
         self.model = AutoModelForImageSegmentation.from_pretrained(
-            model_name, trust_remote_code=True,
+            model_name,
+            revision=revision,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            trust_remote_code=True,
         )
         self.model.eval()
         self.transform_image = transforms.Compose(
@@ -40,4 +51,3 @@ class BiRefNet:
         mask = pred_pil.resize(image_size)
         image.putalpha(mask)
         return image
-    

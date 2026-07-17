@@ -7,6 +7,7 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 from PIL import Image
+from typing import Optional
 
 
 class MlxDINOv3PatchEmbed(nn.Module):
@@ -226,14 +227,25 @@ class MlxDINOv3FeatureExtractor(nn.Module):
         return mx.array(np.stack(processed))
 
 
-def load_dinov3_from_hf(model_name: str = "facebook/dinov3-vitl16-pretrain-lvd1689m",
-                        image_size: int = 512) -> MlxDINOv3FeatureExtractor:
+def load_dinov3_from_hf(
+    model_name: str = "facebook/dinov3-vitl16-pretrain-lvd1689m",
+    image_size: int = 512,
+    *,
+    revision: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+    local_files_only: bool = False,
+) -> MlxDINOv3FeatureExtractor:
     """Load DINOv3 weights from HuggingFace into MLX model."""
     from huggingface_hub import hf_hub_download
     import json
 
-    config_path = hf_hub_download(model_name, "config.json")
-    weight_path = hf_hub_download(model_name, "model.safetensors")
+    hub_kwargs = {
+        "revision": revision,
+        "cache_dir": cache_dir,
+        "local_files_only": local_files_only,
+    }
+    config_path = hf_hub_download(model_name, "config.json", **hub_kwargs)
+    weight_path = hf_hub_download(model_name, "model.safetensors", **hub_kwargs)
 
     with open(config_path) as f:
         config = json.load(f)

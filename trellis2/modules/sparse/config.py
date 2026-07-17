@@ -1,4 +1,5 @@
 from typing import *
+import math
 import platform
 import sys
 
@@ -12,12 +13,15 @@ def __detect_defaults():
     if platform.system() == 'Darwin':
         if __flex_gemm_works_on_mps():
             CONV = 'flex_gemm'
-            # flex_gemm_sparse_attn is now flash-attention-v2 with simdgroup
-            # matmul + simd-shuffle softmax (5–15× over SDPA-padded-CPU-bounce
-            # at every measured shape including max_seqlen=2048). The conv
-            # probe above covers the same package, so if it passed, the
-            # attention path is available too.
-            ATTN = 'flex_gemm_sparse_attn'
+            # Sparse convolution and sparse attention are separate Metal
+            # kernels. A working convolution install does not prove that the
+            # attention entry point is ABI-compatible with the active torch
+            # build, so select it only after its own numerical probe.
+            ATTN = (
+                'flex_gemm_sparse_attn'
+                if probe_flex_gemm_sparse_attention_on_mps()
+                else 'sdpa'
+            )
         else:
             CONV = 'pytorch'
             ATTN = 'sdpa'
@@ -35,6 +39,9 @@ def __flex_gemm_works_on_mps():
     and move to MPS because some PyTorch builds lack int/fp16 torch.zeros
     kernels on MPS."""
     try:
+        import os
+        if os.environ.get('TRELLIS_DISABLE_METAL', '0') == '1':
+            return False
         import torch
         if not torch.backends.mps.is_available():
             return False
@@ -55,6 +62,60 @@ def __flex_gemm_works_on_mps():
             if out.device.type != 'mps':
                 return False
         return True
+    except Exception:
+        return False
+
+
+def probe_flex_gemm_sparse_attention_on_mps() -> bool:
+    """Exercise the real Metal sparse-attention kernel and compare it to SDPA.
+
+    This intentionally uses the production head dimension (64) while keeping
+    the sequence tiny. Returning ``False`` is a controlled capability result:
+    callers fall back to PyTorch SDPA without disabling working Metal sparse
+    convolution kernels.
+    """
+    try:
+        import os
+        if os.environ.get('TRELLIS_DISABLE_METAL', '0') == '1':
+            return False
+
+        import torch
+        import torch.nn.functional as F
+        if not torch.backends.mps.is_available():
+            return False
+
+        import flex_gemm
+
+        tokens, heads, head_dim = 16, 2, 64
+        generator = torch.Generator(device='cpu').manual_seed(42)
+        q = torch.randn(tokens, heads, head_dim, dtype=torch.float16, generator=generator).to('mps').contiguous()
+        k = torch.randn(tokens, heads, head_dim, dtype=torch.float16, generator=generator).to('mps').contiguous()
+        v = torch.randn(tokens, heads, head_dim, dtype=torch.float16, generator=generator).to('mps').contiguous()
+        cu_seqlens = torch.tensor([0, tokens], dtype=torch.int32).to('mps')
+
+        out = flex_gemm.kernels.cuda.sparse_attention_fwd(
+            q,
+            k,
+            v,
+            cu_seqlens,
+            cu_seqlens,
+            tokens,
+            tokens,
+            1.0 / math.sqrt(head_dim),
+        )
+        reference = F.scaled_dot_product_attention(
+            q.transpose(0, 1).unsqueeze(0),
+            k.transpose(0, 1).unsqueeze(0),
+            v.transpose(0, 1).unsqueeze(0),
+        ).squeeze(0).transpose(0, 1)
+        torch.mps.synchronize()
+
+        return (
+            out.device.type == 'mps'
+            and out.shape == reference.shape
+            and bool(torch.isfinite(out).all().item())
+            and bool(torch.allclose(out, reference, rtol=2e-2, atol=2e-2))
+        )
     except Exception:
         return False
 

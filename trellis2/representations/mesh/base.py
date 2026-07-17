@@ -2,6 +2,7 @@ from typing import *
 import torch
 import torch.nn.functional as F_grid
 import numpy as np
+import os
 from ..voxel import Voxel
 
 from trellis2.backends import (
@@ -46,7 +47,10 @@ class Mesh:
         return self.to('cpu')
 
     def _gpu_device(self):
-        if _HAS_MPS:
+        # Decoder-sized meshes have historically triggered watchdogs or
+        # process-level crashes in Metal cleanup kernels. Keep the supported
+        # default on the safe CPU implementations; advanced users may opt in.
+        if _HAS_MPS and os.environ.get('TRELLIS_ENABLE_MPS_DECODE_MESH_OPS') == '1':
             return 'mps'
         if _HAS_CUDA:
             return 'cuda'

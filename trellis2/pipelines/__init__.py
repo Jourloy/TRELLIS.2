@@ -1,4 +1,5 @@
 import importlib
+from ..model_revisions import revision_for_repo
 
 __attributes = {
     "Trellis2ImageTo3DPipeline": "trellis2_image_to_3d",
@@ -23,7 +24,7 @@ def __getattr__(name):
     return globals()[name]
 
 
-def from_pretrained(path: str):
+def from_pretrained(path: str, **hub_kwargs):
     """
     Load a pipeline from a model folder or a Hugging Face model hub.
 
@@ -38,11 +39,13 @@ def from_pretrained(path: str):
         config_file = f"{path}/pipeline.json"
     else:
         from huggingface_hub import hf_hub_download
-        config_file = hf_hub_download(path, "pipeline.json")
+        if hub_kwargs.get("revision") is None:
+            hub_kwargs["revision"] = revision_for_repo(path)
+        config_file = hf_hub_download(path, "pipeline.json", **hub_kwargs)
 
     with open(config_file, 'r') as f:
         config = json.load(f)
-    return globals()[config['name']].from_pretrained(path)
+    return globals()[config['name']].from_pretrained(path, **hub_kwargs)
 
 
 # For PyLance

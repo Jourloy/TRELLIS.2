@@ -1,59 +1,93 @@
-"""Download TRELLIS.2 weights into a local directory structure.
-
-The rest of the codebase already knows how to load TRELLIS.2 from a local
-snapshot directory as long as it contains the same layout as the Hugging Face
-repo root:
-
-    pipeline.json
-    texturing_pipeline.json
-    ckpts/*.json
-    ckpts/*.safetensors
-
-Example:
-    python export/download_weights.py --output-dir weights/TRELLIS.2-4B
-"""
+#!/usr/bin/env python3
+"""Populate the dedicated Hugging Face cache with every pinned runtime input."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import sys
+import time
+from pathlib import Path
+
+# The Xet transport has produced non-resumable response-body decode failures
+# on large model shards on macOS. Plain HTTP keeps .incomplete files in the
+# selected HF cache and resumes them on the next attempt.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 from huggingface_hub import snapshot_download
+from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from trellis2.model_revisions import MODEL_REVISIONS, TRELLIS_REPO
 
 
-DEFAULT_PATTERNS = [
-    "pipeline.json",
-    "texturing_pipeline.json",
-    "ckpts/*",
-]
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Download TRELLIS.2 weights locally")
-    parser.add_argument("--repo-id", default="microsoft/TRELLIS.2-4B")
-    parser.add_argument("--output-dir", default="weights/TRELLIS.2-4B")
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--full-snapshot",
-        action="store_true",
-        help="Download the entire repo instead of just pipeline configs and checkpoints",
+        "--cache-dir",
+        type=Path,
+        default=Path.home() / ".cache" / "trellis2" / "huggingface",
     )
+    parser.add_argument("--offline", action="store_true", help="verify that the pinned cache is complete")
+    parser.add_argument("--max-workers", type=int, default=2)
+    parser.add_argument("--retries", type=int, default=3)
     args = parser.parse_args()
+    if args.max_workers < 1:
+        parser.error("--max-workers must be at least 1")
+    if args.retries < 1:
+        parser.error("--retries must be at least 1")
+    cache_dir = args.cache_dir.expanduser().resolve()
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    output_dir = os.path.abspath(args.output_dir)
-    os.makedirs(output_dir, exist_ok=True)
+    snapshots = {}
+    for repo_id, revision in MODEL_REVISIONS.items():
+        for attempt in range(1, args.retries + 1):
+            try:
+                snapshots[repo_id] = snapshot_download(
+                    repo_id=repo_id,
+                    revision=revision,
+                    cache_dir=str(cache_dir),
+                    local_files_only=args.offline,
+                    max_workers=args.max_workers,
+                )
+                break
+            except GatedRepoError as exc:
+                raise RuntimeError(
+                    f"access to {repo_id}@{revision} is gated; accept its terms and run "
+                    "`hf auth login`, then retry"
+                ) from exc
+            except (OSError, RuntimeError, HfHubHTTPError) as exc:
+                if args.offline or attempt == args.retries:
+                    raise RuntimeError(
+                        f"failed to cache {repo_id}@{revision} after {attempt} attempt(s): {exc}"
+                    ) from exc
+                delay = min(5, attempt * 2)
+                print(
+                    f"Retrying {repo_id}@{revision} after transient download error "
+                    f"({attempt}/{args.retries}): {exc}",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
 
-    download_kwargs = {
-        "repo_id": args.repo_id,
-        "local_dir": output_dir,
-        "local_dir_use_symlinks": False,
-        "resume_download": True,
-    }
-    if not args.full_snapshot:
-        download_kwargs["allow_patterns"] = DEFAULT_PATTERNS
-
-    snapshot_path = snapshot_download(**download_kwargs)
-    print(f"Downloaded {args.repo_id} to {snapshot_path}")
+    print(
+        json.dumps(
+            {
+                "cache_dir": str(cache_dir),
+                "primary_repo": TRELLIS_REPO,
+                "revisions": MODEL_REVISIONS,
+                "snapshots": snapshots,
+                "offline": args.offline,
+                "max_workers": args.max_workers,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

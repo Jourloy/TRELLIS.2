@@ -5,10 +5,10 @@ runs a SparseConv3d through the flex_gemm backend, and feeds the result
 through a LayerNorm — the exact path that originally crashed with
 "Passed CPU tensor to MPS op" before mtlgemm's device-routing fix.
 
-Exercises both Algorithm.IMPLICIT_GEMM (default dense kernel) and
-Algorithm.MASKED_IMPLICIT_GEMM (the masked kernel that landed in mtlgemm
-round 2). Both should produce numerically equivalent output and pass the
-LayerNorm hand-off without crashing.
+Exercises Algorithm.IMPLICIT_GEMM, Algorithm.MASKED_IMPLICIT_GEMM, and the
+production default Algorithm.MASKED_IMPLICIT_GEMM_SPLITK. All should produce
+numerically equivalent output and pass the LayerNorm hand-off without
+crashing.
 
 Note: this script intentionally uses torch.nn.functional.layer_norm rather
 than trellis2's SparseLayerNorm wrapper, because that wrapper currently calls
@@ -26,7 +26,8 @@ import torch
 assert torch.backends.mps.is_available(), "This test needs MPS"
 
 from trellis2.modules.sparse import SparseTensor, SparseConv3d
-from flex_gemm.ops.spconv import Algorithm, set_algorithm
+from trellis2.modules.sparse.conv import config as conv_config
+from flex_gemm.ops.spconv import Algorithm
 
 device = "mps"
 dtype = torch.float16
@@ -57,8 +58,18 @@ if conv.bias is not None:
 print(f"Conv weight device: {conv.weight.device}, dtype: {conv.weight.dtype}")
 
 def _run_with_algo(algo, label):
-    set_algorithm(algo)
-    out = conv(x)
+    # conv_flex_gemm sets flex_gemm's global algorithm from this config on
+    # every forward call, so changing flex_gemm directly would be overwritten.
+    conv_config.FLEX_GEMM_ALGO = algo
+    # Neighbor-cache layouts are algorithm-specific. Use a fresh sparse tensor
+    # so this parity test cannot feed one algorithm another algorithm's cache.
+    run_x = SparseTensor(
+        feats=feats,
+        coords=coords,
+        shape=torch.Size([1, ch]),
+        spatial_shape=[res, res, res],
+    )
+    out = conv(run_x)
     assert out.feats.device.type == "mps", f"FAIL [{label}]: SparseConv3d on {out.feats.device}, expected mps"
     assert out.feats.dtype == dtype, f"FAIL [{label}]: SparseConv3d dtype {out.feats.dtype}, expected {dtype}"
     # LayerNorm hand-off — the original crash site
@@ -73,13 +84,17 @@ def _run_with_algo(algo, label):
 print()
 y_dense  = _run_with_algo(Algorithm.IMPLICIT_GEMM, "IMPLICIT_GEMM (dense)")
 y_masked = _run_with_algo(Algorithm.MASKED_IMPLICIT_GEMM, "MASKED_IMPLICIT_GEMM")
+y_splitk = _run_with_algo(Algorithm.MASKED_IMPLICIT_GEMM_SPLITK, "MASKED_IMPLICIT_GEMM_SPLITK")
 
 # Numerical parity between the two algorithms — same inputs, equivalent output.
 diff = (y_dense - y_masked).abs().max().item()
+splitk_diff = (y_dense - y_splitk).abs().max().item()
 parity_tol = 2e-2  # fp16 — masked reduces in a different order
 assert diff <= parity_tol, f"FAIL: dense vs masked diff {diff:.4e} > tol {parity_tol:.4e}"
+assert splitk_diff <= parity_tol, f"FAIL: dense vs split-k diff {splitk_diff:.4e} > tol {parity_tol:.4e}"
 print(f"  parity dense vs masked: max_diff={diff:.4e} (tol={parity_tol})")
+print(f"  parity dense vs split-k: max_diff={splitk_diff:.4e} (tol={parity_tol})")
 
 print()
 print("PASS — trellis2-apple SparseConv3d + LayerNorm runs end-to-end on MPS via flex_gemm")
-print("       Both IMPLICIT_GEMM and MASKED_IMPLICIT_GEMM produce equivalent output.")
+print("       Dense, masked, and production split-k algorithms produce equivalent output.")

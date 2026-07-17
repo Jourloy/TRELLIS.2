@@ -68,15 +68,24 @@ class Trellis2TexturingPipeline(Pipeline):
         self._device = 'cpu'
 
     @classmethod
-    def from_pretrained(cls, path: str, config_file: str = "pipeline.json") -> "Trellis2TexturingPipeline":
+    def from_pretrained(
+        cls,
+        path: str,
+        config_file: str = "pipeline.json",
+        **hub_kwargs,
+    ) -> "Trellis2TexturingPipeline":
         """
         Load a pretrained model.
 
         Args:
             path (str): The path to the model. Can be either local path or a Hugging Face repository.
         """
-        pipeline = super().from_pretrained(path, config_file)
+        pipeline = super().from_pretrained(path, config_file, **hub_kwargs)
         args = pipeline._pretrained_args
+        dependency_hub_kwargs = {
+            "cache_dir": hub_kwargs.get("cache_dir"),
+            "local_files_only": hub_kwargs.get("local_files_only", False),
+        }
 
         pipeline.tex_slat_sampler = getattr(samplers, args['tex_slat_sampler']['name'])(**args['tex_slat_sampler']['args'])
         pipeline.tex_slat_sampler_params = args['tex_slat_sampler']['params']
@@ -84,8 +93,14 @@ class Trellis2TexturingPipeline(Pipeline):
         pipeline.shape_slat_normalization = args['shape_slat_normalization']
         pipeline.tex_slat_normalization = args['tex_slat_normalization']
 
-        pipeline.image_cond_model = getattr(image_feature_extractor, args['image_cond_model']['name'])(**args['image_cond_model']['args'])
-        pipeline.rembg_model = getattr(rembg, args['rembg_model']['name'])(**args['rembg_model']['args'])
+        pipeline.image_cond_model = getattr(image_feature_extractor, args['image_cond_model']['name'])(
+            **args['image_cond_model']['args'],
+            **dependency_hub_kwargs,
+        )
+        pipeline.rembg_model = getattr(rembg, args['rembg_model']['name'])(
+            **args['rembg_model']['args'],
+            **dependency_hub_kwargs,
+        )
 
         pipeline.low_vram = args.get('low_vram', True)
         pipeline.pbr_attr_layout = {
