@@ -19,6 +19,43 @@ MODEL_REVISIONS = {
     RMBG_REPO: RMBG_REVISION,
 }
 
+# Exact runtime files for the supported image-to-3D CLI. Keeping this manifest
+# avoids caching unrelated encoders, legacy checkpoints, and every ONNX/RMBG
+# weight variant while still supporting 512, 1024, and 1024_cascade offline.
+MODEL_FILES = {
+    TRELLIS_REPO: (
+        "pipeline.json",
+        "ckpts/ss_flow_img_dit_1_3B_64_bf16.json",
+        "ckpts/ss_flow_img_dit_1_3B_64_bf16.safetensors",
+        "ckpts/shape_dec_next_dc_f16c32_fp16.json",
+        "ckpts/shape_dec_next_dc_f16c32_fp16.safetensors",
+        "ckpts/slat_flow_img2shape_dit_1_3B_512_bf16.json",
+        "ckpts/slat_flow_img2shape_dit_1_3B_512_bf16.safetensors",
+        "ckpts/slat_flow_img2shape_dit_1_3B_1024_bf16.json",
+        "ckpts/slat_flow_img2shape_dit_1_3B_1024_bf16.safetensors",
+        "ckpts/tex_dec_next_dc_f16c32_fp16.json",
+        "ckpts/tex_dec_next_dc_f16c32_fp16.safetensors",
+        "ckpts/slat_flow_imgshape2tex_dit_1_3B_512_bf16.json",
+        "ckpts/slat_flow_imgshape2tex_dit_1_3B_512_bf16.safetensors",
+        "ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.json",
+        "ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.safetensors",
+    ),
+    TRELLIS_IMAGE_LARGE_REPO: (
+        "ckpts/ss_dec_conv3d_16l8_fp16.json",
+        "ckpts/ss_dec_conv3d_16l8_fp16.safetensors",
+    ),
+    DINOV3_REPO: (
+        "config.json",
+        "model.safetensors",
+    ),
+    RMBG_REPO: (
+        "config.json",
+        "BiRefNet_config.py",
+        "birefnet.py",
+        "model.safetensors",
+    ),
+}
+
 SOURCE_REVISIONS = {
     "pedronaugusto/mtlgemm": "867aec8234299a7fe1ede7f802c8debe5a939a82",
     "pedronaugusto/mtldiffrast": "4668cd91cb6d27f5e264731f94a06841fbf7aab8",

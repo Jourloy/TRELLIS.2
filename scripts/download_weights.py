@@ -21,7 +21,7 @@ from huggingface_hub.errors import GatedRepoError, HfHubHTTPError
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from trellis2.model_revisions import MODEL_REVISIONS, TRELLIS_REPO
+from trellis2.model_revisions import MODEL_FILES, MODEL_REVISIONS, TRELLIS_REPO
 
 
 def main() -> int:
@@ -52,6 +52,7 @@ def main() -> int:
                     cache_dir=str(cache_dir),
                     local_files_only=args.offline,
                     max_workers=args.max_workers,
+                    allow_patterns=list(MODEL_FILES[repo_id]),
                 )
                 break
             except GatedRepoError as exc:
@@ -78,6 +79,7 @@ def main() -> int:
                 "cache_dir": str(cache_dir),
                 "primary_repo": TRELLIS_REPO,
                 "revisions": MODEL_REVISIONS,
+                "runtime_files": MODEL_FILES,
                 "snapshots": snapshots,
                 "offline": args.offline,
                 "max_workers": args.max_workers,

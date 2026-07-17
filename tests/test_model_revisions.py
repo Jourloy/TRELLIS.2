@@ -3,6 +3,7 @@ from pathlib import Path
 from trellis2.model_revisions import (
     DINOV3_REPO,
     DINOV3_REVISION,
+    MODEL_FILES,
     MODEL_REVISIONS,
     RMBG_REPO,
     RMBG_REVISION,
@@ -21,6 +22,9 @@ def test_runtime_revisions_are_full_commits():
     assert MODEL_REVISIONS[RMBG_REPO] == RMBG_REVISION
     assert all(len(revision) == 40 for revision in MODEL_REVISIONS.values())
     assert all(len(revision) == 40 for revision in SOURCE_REVISIONS.values())
+    assert MODEL_FILES.keys() == MODEL_REVISIONS.keys()
+    assert all(files for files in MODEL_FILES.values())
+    assert all(len(files) == len(set(files)) for files in MODEL_FILES.values())
 
 
 def test_unknown_repo_keeps_explicit_revision():
