@@ -201,6 +201,8 @@ def _export_pbr(
     remesh: bool,
     remesh_band: float,
     remesh_project: float,
+    remesh_project_max_dist: float,
+    remesh_project_min_agreement: float,
     technical_safety_target: bool,
 ):
     vertices = mesh.vertices.cpu()
@@ -256,6 +258,8 @@ def _export_pbr(
         remesh=remesh,
         remesh_band=remesh_band,
         remesh_project=remesh_project,
+        remesh_project_max_dist=remesh_project_max_dist,
+        remesh_project_min_agreement=remesh_project_min_agreement,
         verbose=True,
     )
     result.export(path)
@@ -286,6 +290,8 @@ def _run_pbr_attempts(
     remesh: bool = True,
     remesh_band: float = 1.0,
     remesh_project: float = 0.7,
+    remesh_project_max_dist: float = 1.5,
+    remesh_project_min_agreement: float = 0.5,
     export_fn=None,
     on_attempt=None,
 ):
@@ -300,6 +306,8 @@ def _run_pbr_attempts(
             "remeshed": False,
             "remesh_band": remesh_band,
             "remesh_project": remesh_project,
+            "remesh_project_max_dist": remesh_project_max_dist,
+            "remesh_project_min_agreement": remesh_project_min_agreement,
             "technical_safety_target": (
                 requested_target is None
                 and target == SAFETY_FACE_TARGET
@@ -317,6 +325,8 @@ def _run_pbr_attempts(
                 remesh=remesh,
                 remesh_band=remesh_band,
                 remesh_project=remesh_project,
+                remesh_project_max_dist=remesh_project_max_dist,
+                remesh_project_min_agreement=remesh_project_min_agreement,
                 technical_safety_target=attempt["technical_safety_target"],
             )
             attempt["status"] = "ok"
@@ -452,6 +462,8 @@ def _parse_args(argv: Optional[list[str]] = None):
     parser.set_defaults(remesh=True)
     parser.add_argument("--remesh-band", type=float, default=1.0)
     parser.add_argument("--remesh-project", type=float, default=0.7)
+    parser.add_argument("--remesh-project-max-dist", type=float, default=1.5)
+    parser.add_argument("--remesh-project-min-agreement", type=float, default=0.5)
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -511,6 +523,8 @@ def main() -> int:
             "remesh": args.remesh,
             "remesh_band": args.remesh_band,
             "remesh_project": args.remesh_project,
+            "remesh_project_max_dist": args.remesh_project_max_dist,
+            "remesh_project_min_agreement": args.remesh_project_min_agreement,
             "fp32_decode_thresholds": fp32_decode_thresholds_enabled(),
             "offline": args.offline,
             "cache_dir": args.cache_dir,
@@ -590,6 +604,8 @@ def main() -> int:
             remesh=args.remesh,
             remesh_band=args.remesh_band,
             remesh_project=args.remesh_project,
+            remesh_project_max_dist=args.remesh_project_max_dist,
+            remesh_project_min_agreement=args.remesh_project_min_agreement,
             on_attempt=record_attempt,
         )
 

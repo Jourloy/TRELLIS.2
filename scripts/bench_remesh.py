@@ -31,10 +31,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--resolution", type=int, default=512)
     parser.add_argument("--band", type=float, default=1.0)
     parser.add_argument("--project", type=float, default=0.0)
+    parser.add_argument(
+        "--no-guard",
+        action="store_true",
+        help="Use the remesher's original unguarded project_back path for A/B runs.",
+    )
     parser.add_argument("--skip-prefill", action="store_true")
     parser.add_argument(
         "--cleanup-ops",
-        default="dedup,repair_nm,small_components,fill_holes",
+        default="dedup,small_components,fill_holes,unify",
         help=(
             "Comma-separated cleanup ops applied after remesh, each recorded "
             "as its own stage: dedup, repair_nm, small_components, fill_holes, "
@@ -106,17 +111,18 @@ def _record_stage(
     seconds: float,
     vertices: torch.Tensor,
     faces: torch.Tensor,
+    **details: Any,
 ) -> None:
     vertices_np, faces_np = _as_numpy(vertices, faces)
-    report["stages"].append(
-        {
-            "name": name,
-            "seconds": round(seconds, 3),
-            "vertices": int(vertices_np.shape[0]),
-            "faces": int(faces_np.shape[0]),
-            "integrity": measure(vertices_np, faces_np),
-        }
-    )
+    stage = {
+        "name": name,
+        "seconds": round(seconds, 3),
+        "vertices": int(vertices_np.shape[0]),
+        "faces": int(faces_np.shape[0]),
+        "integrity": measure(vertices_np, faces_np),
+    }
+    stage.update(details)
+    report["stages"].append(stage)
 
 
 def _export_mesh(path: Path, vertices: torch.Tensor, faces: torch.Tensor) -> None:
@@ -154,6 +160,7 @@ def main() -> int:
             "resolution": args.resolution,
             "band": args.band,
             "project": args.project,
+            "no_guard": args.no_guard,
             "skip_prefill": args.skip_prefill,
             "cleanup_ops": args.cleanup_ops,
         },
@@ -218,20 +225,45 @@ def main() -> int:
         )
         center = aabb.mean(dim=0)
         scale = (aabb[1] - aabb[0]).max().item()
+        remesh_domain_scale = (
+            (args.resolution + 3 * args.band) / args.resolution * scale
+        )
+        source_vertices, source_faces = vertices, faces
         stage_started = time.perf_counter()
         vertices, faces = remesh_narrow_band_dc(
-            vertices,
-            faces,
+            source_vertices,
+            source_faces,
             center=center,
-            scale=(args.resolution + 3 * args.band) / args.resolution * scale,
+            scale=remesh_domain_scale,
             resolution=args.resolution,
             band=args.band,
-            project_back=args.project,
+            project_back=args.project if args.no_guard else 0,
             verbose=True,
             bvh=bvh,
         )
+        moved_count = int(vertices.shape[0]) if args.no_guard and args.project > 0 else 0
+        reverted_count = 0
+        if args.project > 0 and not args.no_guard:
+            vertices, moved_count, reverted_count = postprocess._guarded_project_back(
+                vertices,
+                faces,
+                source_vertices,
+                source_faces,
+                bvh,
+                strength=args.project,
+                voxel_size=remesh_domain_scale / args.resolution,
+                verbose=True,
+            )
         stage_seconds = time.perf_counter() - stage_started
-        _record_stage(report, "remesh", stage_seconds, vertices, faces)
+        _record_stage(
+            report,
+            "remesh",
+            stage_seconds,
+            vertices,
+            faces,
+            moved_count=moved_count,
+            reverted_count=reverted_count,
+        )
         _write_json(report_path, report)
 
         cleanup_ops = [op for op in args.cleanup_ops.split(",") if op and op != "none"]

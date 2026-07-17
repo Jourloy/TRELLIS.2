@@ -24,6 +24,8 @@ def test_remesh_cli_defaults_and_overrides():
     assert defaults.remesh is True
     assert defaults.remesh_band == 1.0
     assert defaults.remesh_project == 0.7
+    assert defaults.remesh_project_max_dist == 1.5
+    assert defaults.remesh_project_min_agreement == 0.5
 
     disabled = generate_asset._parse_args(
         [
@@ -35,11 +37,17 @@ def test_remesh_cli_defaults_and_overrides():
             "1.5",
             "--remesh-project",
             "0.25",
+            "--remesh-project-max-dist",
+            "2.25",
+            "--remesh-project-min-agreement",
+            "0.75",
         ]
     )
     assert disabled.remesh is False
     assert disabled.remesh_band == 1.5
     assert disabled.remesh_project == 0.25
+    assert disabled.remesh_project_max_dist == 2.25
+    assert disabled.remesh_project_min_agreement == 0.75
 
     enabled = generate_asset._parse_args(
         ["input.png", "--output-dir", "output", "--remesh"]
@@ -120,6 +128,10 @@ def test_export_pre_simplifies_only_non_remesh_safety_attempts(monkeypatch, tmp_
                 "remesh": kwargs["remesh"],
                 "remesh_band": kwargs["remesh_band"],
                 "remesh_project": kwargs["remesh_project"],
+                "remesh_project_max_dist": kwargs["remesh_project_max_dist"],
+                "remesh_project_min_agreement": kwargs[
+                    "remesh_project_min_agreement"
+                ],
             }
         )
         return Exported()
@@ -150,6 +162,8 @@ def test_export_pre_simplifies_only_non_remesh_safety_attempts(monkeypatch, tmp_
         remesh=True,
         remesh_band=1.25,
         remesh_project=0.2,
+        remesh_project_max_dist=2.0,
+        remesh_project_min_agreement=0.6,
         technical_safety_target=True,
     )
     _, legacy_pre_simplified = generate_asset._export_pbr(
@@ -161,6 +175,8 @@ def test_export_pre_simplifies_only_non_remesh_safety_attempts(monkeypatch, tmp_
         remesh=False,
         remesh_band=1.0,
         remesh_project=0.0,
+        remesh_project_max_dist=1.5,
+        remesh_project_min_agreement=0.5,
         technical_safety_target=True,
     )
 
@@ -173,12 +189,16 @@ def test_export_pre_simplifies_only_non_remesh_safety_attempts(monkeypatch, tmp_
             "remesh": True,
             "remesh_band": 1.25,
             "remesh_project": 0.2,
+            "remesh_project_max_dist": 2.0,
+            "remesh_project_min_agreement": 0.6,
         },
         {
             "faces": generate_asset.SAFETY_FACE_TARGET,
             "remesh": False,
             "remesh_band": 1.0,
             "remesh_project": 0.0,
+            "remesh_project_max_dist": 1.5,
+            "remesh_project_min_agreement": 0.5,
         },
     ]
 
@@ -196,6 +216,8 @@ def test_simulated_bvh_failure_uses_full_kdtree(tmp_path: Path):
         remesh,
         remesh_band,
         remesh_project,
+        remesh_project_max_dist,
+        remesh_project_min_agreement,
         technical_safety_target,
     ):
         calls.append(
@@ -206,6 +228,8 @@ def test_simulated_bvh_failure_uses_full_kdtree(tmp_path: Path):
                 remesh,
                 remesh_band,
                 remesh_project,
+                remesh_project_max_dist,
+                remesh_project_min_agreement,
                 technical_safety_target,
             )
         )
@@ -222,18 +246,22 @@ def test_simulated_bvh_failure_uses_full_kdtree(tmp_path: Path):
         texture_size=1024,
         remesh_band=1.25,
         remesh_project=0.2,
+        remesh_project_max_dist=2.25,
+        remesh_project_min_agreement=0.75,
         export_fn=fake_export,
     )
 
     assert calls == [
-        ("metal", None, 1024, True, 1.25, 0.2, False),
-        ("kdtree", None, 1024, True, 1.25, 0.2, False),
+        ("metal", None, 1024, True, 1.25, 0.2, 2.25, 0.75, False),
+        ("kdtree", None, 1024, True, 1.25, 0.2, 2.25, 0.75, False),
     ]
     assert chosen["baker"] == "kdtree"
     assert chosen["target_faces"] is None
     assert chosen["remeshed"] is False
     assert chosen["remesh_band"] == 1.25
     assert chosen["remesh_project"] == 0.2
+    assert chosen["remesh_project_max_dist"] == 2.25
+    assert chosen["remesh_project_min_agreement"] == 0.75
     assert [attempt["status"] for attempt in attempts] == ["failed", "ok"]
     assert [attempt["remeshed"] for attempt in attempts] == [False, False]
 
@@ -251,6 +279,8 @@ def test_safety_candidate_is_only_after_both_full_attempts(tmp_path: Path):
         remesh,
         remesh_band,
         remesh_project,
+        remesh_project_max_dist,
+        remesh_project_min_agreement,
         technical_safety_target,
     ):
         calls.append((baker, target, remesh, technical_safety_target))
@@ -291,6 +321,8 @@ def test_non_remesh_safety_attempt_keeps_pre_simplification(tmp_path: Path):
         remesh,
         remesh_band,
         remesh_project,
+        remesh_project_max_dist,
+        remesh_project_min_agreement,
         technical_safety_target,
     ):
         calls.append((baker, target, remesh, technical_safety_target))
@@ -332,6 +364,8 @@ def test_explicit_200k_target_is_not_mislabeled_as_safety_fallback(tmp_path: Pat
         remesh,
         remesh_band,
         remesh_project,
+        remesh_project_max_dist,
+        remesh_project_min_agreement,
         technical_safety_target,
     ):
         path.write_bytes(b"candidate")
