@@ -10,6 +10,25 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.skipif(platform.system() != "Darwin", reason="macOS backend default")
+def test_dense_attention_defaults_to_sdpa_on_macos():
+    env = os.environ.copy()
+    env.pop("ATTN_BACKEND", None)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from trellis2.modules.attention import config; print('BACKEND=' + config.BACKEND)",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "BACKEND=sdpa" in completed.stdout
+
+
 def test_disable_metal_selects_controlled_pytorch_fallback():
     env = os.environ.copy()
     env.update(
@@ -49,22 +68,40 @@ print('REPORT=' + json.dumps({
 
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Metal probe requires macOS")
 def test_metal_sparse_attention_has_its_own_numerical_probe():
-    import torch
-
-    if not torch.backends.mps.is_available():
+    # Pipeline imports performed by other test modules may already have made a
+    # controlled fallback choice. Exercise auto-detection in a fresh process,
+    # which also mirrors a real CLI invocation.
+    code = r"""
+import json
+import torch
+if not torch.backends.mps.is_available():
+    raise SystemExit(77)
+from trellis2.modules.sparse import config
+from trellis2.backends import probe_metal_backends
+print('REPORT=' + json.dumps({
+    'probe': config.probe_flex_gemm_sparse_attention_on_mps(),
+    'conv': config.CONV,
+    'attention': config.ATTN,
+    'metal': probe_metal_backends(),
+}, sort_keys=True))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode == 77:
         pytest.skip("MPS is unavailable")
-
-    from trellis2.modules.sparse import config
-
-    assert config.probe_flex_gemm_sparse_attention_on_mps()
-    assert config.CONV == "flex_gemm"
-    assert config.ATTN == "flex_gemm_sparse_attn"
-
-    from trellis2.backends import probe_metal_backends
-
-    probes = probe_metal_backends()
-    assert probes["rasterizer"]["ok"], probes["rasterizer"]
-    assert probes["mesh_bvh"]["ok"], probes["mesh_bvh"]
+    assert completed.returncode == 0, completed.stderr
+    line = next(line for line in completed.stdout.splitlines() if line.startswith("REPORT="))
+    report = json.loads(line.removeprefix("REPORT="))
+    assert report["probe"]
+    assert report["conv"] == "flex_gemm"
+    assert report["attention"] == "flex_gemm_sparse_attn"
+    assert report["metal"]["rasterizer"]["ok"], report["metal"]["rasterizer"]
+    assert report["metal"]["mesh_bvh"]["ok"], report["metal"]["mesh_bvh"]
 
 
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Metal parity requires macOS")
