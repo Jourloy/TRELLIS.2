@@ -18,6 +18,19 @@ import torch
 HAS_MPS = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
 HAS_CUDA = torch.cuda.is_available()
 METAL_DISABLED = os.environ.get('TRELLIS_DISABLE_METAL', '0') == '1'
+
+# Upstream microsoft/TRELLIS.2#169: fp16 GEMMs on non-CUDA backends accumulate
+# in half precision, so decode-time decision logits near zero can flip sign
+# versus fp32 and hard `> 0` thresholds punch scattered holes into the mesh.
+FP32_DECODE_THRESHOLDS_DEFAULT = '0'
+
+
+def fp32_decode_thresholds_enabled() -> bool:
+    return os.environ.get(
+        'TRELLIS_FP32_DECODE_THRESHOLDS', FP32_DECODE_THRESHOLDS_DEFAULT
+    ) == '1'
+
+
 BACKEND_ERRORS = {}
 
 # ---------------------------------------------------------------------------
