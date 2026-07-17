@@ -36,6 +36,7 @@ from trellis2.model_revisions import (  # noqa: E402
     TRELLIS_REPO,
     TRELLIS_REVISION,
 )
+from trellis2.mesh_integrity import measure_glb  # noqa: E402
 
 SAFETY_FACE_TARGET = 200_000
 WATCHDOG_SIGNATURES = (
@@ -189,16 +190,31 @@ def _metal_baker_available() -> tuple[bool, str]:
         return False, str(exc)
 
 
-def _export_pbr(mesh, path: Path, *, baker: str, target: Optional[int], texture_size: int):
+def _export_pbr(
+    mesh,
+    path: Path,
+    *,
+    baker: str,
+    target: Optional[int],
+    texture_size: int,
+    remesh: bool,
+    remesh_band: float,
+    remesh_project: float,
+    technical_safety_target: bool,
+):
     vertices = mesh.vertices.cpu()
     faces = mesh.faces.cpu()
     pre_simplified = False
 
-    # cumesh builds its BVH before its own decimation pass. Reduce only the
-    # technical fallback candidate up front so the same oversized mesh cannot
-    # trip the Metal watchdog again. raw_full.glb is exported separately and
-    # remains untouched.
-    if target is not None and int(faces.shape[0]) > target:
+    # Keep the legacy pre-BVH reduction only for a non-remesh technical fallback.
+    # Remesh accepts arbitrary input size and must receive the full mesh;
+    # raw_full.glb is exported separately and remains untouched.
+    if (
+        not remesh
+        and technical_safety_target
+        and target is not None
+        and int(faces.shape[0]) > target
+    ):
         import fast_simplification
         import torch
 
@@ -236,6 +252,9 @@ def _export_pbr(mesh, path: Path, *, baker: str, target: Optional[int], texture_
         aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
         decimation_target=target,
         texture_size=texture_size,
+        remesh=remesh,
+        remesh_band=remesh_band,
+        remesh_project=remesh_project,
         verbose=True,
     )
     result.export(path)
@@ -263,6 +282,9 @@ def _run_pbr_attempts(
     preferred_baker: str,
     requested_target: Optional[int],
     texture_size: int,
+    remesh: bool = True,
+    remesh_band: float = 1.0,
+    remesh_project: float = 0.0,
     export_fn=None,
     on_attempt=None,
 ):
@@ -274,6 +296,9 @@ def _run_pbr_attempts(
         attempt = {
             "baker": baker,
             "target_faces": target,
+            "remeshed": False,
+            "remesh_band": remesh_band,
+            "remesh_project": remesh_project,
             "technical_safety_target": (
                 requested_target is None
                 and target == SAFETY_FACE_TARGET
@@ -288,9 +313,14 @@ def _run_pbr_attempts(
                 baker=baker,
                 target=target,
                 texture_size=texture_size,
+                remesh=remesh,
+                remesh_band=remesh_band,
+                remesh_project=remesh_project,
+                technical_safety_target=attempt["technical_safety_target"],
             )
             attempt["status"] = "ok"
             attempt["pre_simplified_before_bvh"] = pre_simplified
+            attempt["remeshed"] = bool(baker == "metal" and remesh)
         except Exception as exc:  # each failure is recorded before the prescribed fallback
             exported = None
             attempt["status"] = "failed"
@@ -310,6 +340,20 @@ def _run_pbr_attempts(
         for attempt in attempts
     )
     raise RuntimeError(f"All PBR export attempts failed: {errors}")
+
+
+def _record_integrity_metadata(
+    metadata: dict[str, Any], raw_path: Path, candidate_path: Path
+) -> None:
+    candidate_integrity = measure_glb(candidate_path)
+    raw_integrity = measure_glb(raw_path)
+    metadata["candidate_pbr"]["integrity"] = candidate_integrity
+    metadata["raw_full"]["integrity"] = raw_integrity
+    metadata["candidate_pbr"]["promotable"] = bool(
+        metadata["candidate_pbr"]["remeshed"]
+        and candidate_integrity["boundary_edges"] <= 8
+        and candidate_integrity["winding_consistent"]
+    )
 
 
 def _candidate_stats(path: Path, exported) -> dict[str, Any]:
@@ -389,7 +433,7 @@ def _resolve_backend(requested: str) -> str:
     raise RuntimeError("auto found neither Apple MPS nor NVIDIA CUDA")
 
 
-def _parse_args():
+def _parse_args(argv: Optional[list[str]] = None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -401,10 +445,16 @@ def _parse_args():
     parser.add_argument("--texture-size", type=int, choices=(512, 1024, 2048), default=1024)
     parser.add_argument("--background", choices=("auto", "keep"), default="auto")
     parser.add_argument("--pbr-decimation-target", type=_parse_target, default=None, metavar="none|N")
+    remesh_group = parser.add_mutually_exclusive_group()
+    remesh_group.add_argument("--remesh", dest="remesh", action="store_true")
+    remesh_group.add_argument("--no-remesh", dest="remesh", action="store_false")
+    parser.set_defaults(remesh=True)
+    parser.add_argument("--remesh-band", type=float, default=1.0)
+    parser.add_argument("--remesh-project", type=float, default=0.0)
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--force", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> int:
@@ -457,6 +507,9 @@ def main() -> int:
             "texture_size": args.texture_size,
             "background": args.background,
             "pbr_decimation_target": args.pbr_decimation_target,
+            "remesh": args.remesh,
+            "remesh_band": args.remesh_band,
+            "remesh_project": args.remesh_project,
             "offline": args.offline,
             "cache_dir": args.cache_dir,
         },
@@ -532,6 +585,9 @@ def main() -> int:
             preferred_baker=args.baker,
             requested_target=args.pbr_decimation_target,
             texture_size=args.texture_size,
+            remesh=args.remesh,
+            remesh_band=args.remesh_band,
+            remesh_project=args.remesh_project,
             on_attempt=record_attempt,
         )
 
@@ -544,6 +600,7 @@ def main() -> int:
             metadata["candidate_pbr"]["decimated"]
             and chosen["technical_safety_target"]
         )
+        _record_integrity_metadata(metadata, raw_path, candidate_path)
         metadata["timings_seconds"]["pbr_export"] = round(time.perf_counter() - pbr_started, 3)
         from trellis2.gltf_validation import validate_output_pair
 

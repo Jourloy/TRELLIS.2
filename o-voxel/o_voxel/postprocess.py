@@ -93,9 +93,11 @@ def to_glb(
     grid_size: Union[int, list, tuple, np.ndarray, torch.Tensor] = None,
     decimation_target: Optional[int] = 1000000,
     texture_size: int = 2048,
-    remesh: bool = False,
+    remesh: bool = True,
     remesh_band: float = 1,
-    remesh_project: float = 0.9,
+    # project_back=0 matches upstream app.py; measured >0 drags DC vertices
+    # into dirty source sheets (speckle artifacts on ak74m body and magazine).
+    remesh_project: float = 0,
     mesh_cluster_threshold_cone_half_angle_rad=np.radians(90.0),
     mesh_cluster_refine_iterations=0,
     mesh_cluster_global_iterations=1,
@@ -228,7 +230,7 @@ def to_glb(
     if verbose:
         print("Cleaning mesh...")
     
-    # --- Branch 1: Standard Pipeline (Simplification & Cleaning) ---
+    # --- Branch 1: Legacy Pipeline (Simplification & Cleaning) ---
     if not remesh:
         # Step 1: Aggressive simplification (3x target)
         mesh.simplify(effective_decimation_target * 3, verbose=verbose)
@@ -259,7 +261,7 @@ def to_glb(
         # Step 5: Unify face orientations
         mesh.unify_face_orientations()
     
-    # --- Branch 2: Remeshing Pipeline ---
+    # --- Branch 2: Production Remeshing Pipeline ---
     else:
         center = aabb.mean(dim=0)
         scale = (aabb[1] - aabb[0]).max().item()
@@ -279,18 +281,22 @@ def to_glb(
         if verbose:
             print(f"After remeshing: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
 
-        # Clean up topology before simplification
+        # repair_non_manifold_edges() is intentionally excluded here: on the
+        # measured ak74m body it regressed boundary edges 119 -> 500 and broke
+        # winding by vertex-splitting junctions into open seams.
         mesh.remove_duplicate_faces()
-        mesh.repair_non_manifold_edges()
         mesh.remove_small_connected_components(1e-5)
         mesh.fill_holes(max_hole_perimeter=3e-2)
+        mesh.unify_face_orientations()
         if verbose:
             print(f"After cleanup: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
 
-        # Simplify and clean the remeshed result
-        mesh.simplify(effective_decimation_target, verbose=verbose)
-        if verbose:
-            print(f"After simplifying: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
+        if decimation_target is not None:
+            mesh.simplify(effective_decimation_target, verbose=verbose)
+            mesh.fill_holes(max_hole_perimeter=3e-2)
+            mesh.unify_face_orientations()
+            if verbose:
+                print(f"After simplifying: {mesh.num_vertices} vertices, {mesh.num_faces} faces")
     
     if use_tqdm:
         pbar.update(1)

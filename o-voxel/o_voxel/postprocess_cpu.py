@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import cv2
+import warnings
 from PIL import Image
 import trimesh
 import trimesh.visual
@@ -231,6 +232,13 @@ def to_glb(
     macOS GLB export. Replaces the CUDA pipeline (cumesh + nvdiffrast + flex_gemm)
     with fast_simplification + xatlas + PyTorch MPS rasterization.
     """
+    if remesh:
+        warnings.warn(
+            "kdtree/CPU path cannot remesh; candidate will not be promotable",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
     device = _get_device()
     if verbose:
         print(f"Using device: {device}")
