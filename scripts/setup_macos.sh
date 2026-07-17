@@ -77,15 +77,15 @@ checkout_dependency() {
 
 install_metal_stack() {
     export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
-    checkout_dependency mtlbvh https://github.com/pedronaugusto/mtlbvh.git "$MTLBVH_SHA"
-    "${PIP[@]}" install --no-build-isolation "$DEP_PATH"
-    checkout_dependency mtldiffrast https://github.com/pedronaugusto/mtldiffrast.git "$MTLDIFFRAST_SHA"
-    "${PIP[@]}" install --no-build-isolation "$DEP_PATH"
-    checkout_dependency mtlmesh https://github.com/pedronaugusto/mtlmesh.git "$MTLMESH_SHA"
-    "${PIP[@]}" install --no-build-isolation "$DEP_PATH"
-    checkout_dependency mtlgemm https://github.com/pedronaugusto/mtlgemm.git "$MTLGEMM_SHA"
-    "${PIP[@]}" install --no-build-isolation "$DEP_PATH"
-    BUILD_TARGET=cpu "${PIP[@]}" install --no-build-isolation -e "$ROOT/o-voxel"
+    checkout_dependency mtlbvh https://github.com/pedronaugusto/mtlbvh.git "$MTLBVH_SHA" || return 1
+    "${PIP[@]}" install --no-build-isolation "$DEP_PATH" || return 1
+    checkout_dependency mtldiffrast https://github.com/pedronaugusto/mtldiffrast.git "$MTLDIFFRAST_SHA" || return 1
+    "${PIP[@]}" install --no-build-isolation "$DEP_PATH" || return 1
+    checkout_dependency mtlmesh https://github.com/pedronaugusto/mtlmesh.git "$MTLMESH_SHA" || return 1
+    "${PIP[@]}" install --no-build-isolation "$DEP_PATH" || return 1
+    checkout_dependency mtlgemm https://github.com/pedronaugusto/mtlgemm.git "$MTLGEMM_SHA" || return 1
+    "${PIP[@]}" install --no-build-isolation "$DEP_PATH" || return 1
+    BUILD_TARGET=cpu "${PIP[@]}" install --no-build-isolation -e "$ROOT/o-voxel" || return 1
 }
 
 install_torch_pair "$PRIMARY_TORCH" "$PRIMARY_TORCHVISION"
@@ -95,8 +95,7 @@ resolved_torchvision="$PRIMARY_TORCHVISION"
 if [[ "${SKIP_METAL:-0}" == "1" ]]; then
     BUILD_TARGET=cpu "${PIP[@]}" install --no-build-isolation -e "$ROOT/o-voxel"
 else
-    install_metal_stack
-    if ! "$PYTHON" "$ROOT/scripts/probe_macos.py" --require-metal; then
+    if ! install_metal_stack || ! "$PYTHON" "$ROOT/scripts/probe_macos.py" --require-metal; then
         echo "Primary PyTorch pair failed the Metal build/probe; retrying the prescribed ABI fallback..." >&2
         install_torch_pair "$FALLBACK_TORCH" "$FALLBACK_TORCHVISION"
         install_metal_stack
