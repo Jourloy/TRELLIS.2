@@ -1,4 +1,5 @@
 import importlib
+import sys
 from ..model_revisions import revision_for_repo
 
 __attributes = {
@@ -45,7 +46,7 @@ def from_pretrained(path: str, **hub_kwargs):
 
     with open(config_file, 'r') as f:
         config = json.load(f)
-    return globals()[config['name']].from_pretrained(path, **hub_kwargs)
+    return getattr(sys.modules[__name__], config['name']).from_pretrained(path, **hub_kwargs)
 
 
 # For PyLance

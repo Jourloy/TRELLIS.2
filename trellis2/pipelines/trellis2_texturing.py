@@ -134,7 +134,7 @@ class Trellis2TexturingPipeline(Pipeline):
         vertices[:, 1] = -vertices[:, 2]
         vertices[:, 2] = tmp
         assert np.all(vertices >= -0.5) and np.all(vertices <= 0.5), 'vertices out of range'
-        return trimesh.Trimesh(vertices=vertices, faces=mesh.faces, process=False)
+        return trimesh.Trimesh(vertices=vertices, faces=mesh.faces, process=False, visual=mesh.visual)
 
     def preprocess_image(self, input: Image.Image) -> Image.Image:
         """
@@ -308,9 +308,9 @@ class Trellis2TexturingPipeline(Pipeline):
         resolution: int = 1024,
         texture_size: int = 1024,
     ) -> trimesh.Trimesh:
-        vertices = mesh.vertices
-        faces = mesh.faces
-        normals = mesh.vertex_normals
+        vertices = np.array(mesh.vertices)
+        faces = np.array(mesh.faces)
+        normals = np.array(mesh.vertex_normals)
         vertices_torch = torch.from_numpy(vertices).float().to(self.device)
         faces_torch = torch.from_numpy(faces).int().to(self.device)
         if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None:
